@@ -257,6 +257,66 @@ describe('DataTable', () => {
     expect(onPageSizeChange).toHaveBeenCalledWith(20);
   });
 
+  /**
+   * Locks the *absence* contract, because that is the failure a consumer
+   * actually hits.
+   *
+   * The rows-per-page selector is rendered from `pageSizeOptions` alone, but a
+   * selection can only be *applied* through `onPageSizeChange`. A server-paged
+   * consumer that passes `pageSize` + `pageSizeOptions` and forgets the handler
+   * gets a selector that opens, lists its options, accepts a click, and then
+   * silently keeps the old value: the optional call in `handlePageSizeChange`
+   * is a no-op, and because `pagination.pageSize` is defined the composite
+   * never falls back to internal state. The user sees "clicking an option does
+   * nothing" — exactly the regression this guards.
+   *
+   * The trap is sharpened by `handlePageSizeChange` still resetting the page:
+   * a mis-wired table jumps to page 1 *at the unchanged page size*, so the
+   * screen changes (the footer looks like it reacted) while the setting did
+   * not take. That is why the assertion is on the page size, not on "nothing
+   * happened at all".
+   */
+  it('offers a rows-per-page selector but cannot apply a change without onPageSizeChange', () => {
+    const onPageChange = vi.fn();
+    const DataTableAny = DataTable as unknown as (props: Record<string, unknown>) => React.JSX.Element;
+
+    render(
+      <DataTableAny
+        columns={[
+          { id: 'name', header: 'Name', cell: (row: AssetRow) => row.name },
+          { id: 'owner', header: 'Owner', cell: (row: AssetRow) => row.owner },
+        ]}
+        pagination={{
+          mode: 'server',
+          onPageChange,
+          page: 2,
+          pageSize: 10,
+          pageSizeOptions: [10, 20, 50],
+          rowCount: 25,
+        }}
+        rows={pagedRows.slice(0, 10)}
+        title="Assets"
+      />,
+    );
+
+    // The selector is present — the consumer has no visual hint that the
+    // wiring is incomplete.
+    const trigger = screen.getByRole('combobox', { name: 'Rows per page' });
+    expect(trigger).toBeInTheDocument();
+    expect(trigger.textContent).toBe('10');
+
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole('option', { name: '20' }));
+
+    // The page-size route is the only channel that could carry "20", and it is
+    // absent, so the controlled value is stuck: nothing reports the change.
+    // (The page reset below is real but moves the page, not the page size.)
+    expect(screen.getByRole('combobox', { name: 'Rows per page' }).textContent).toBe('10');
+    // Confirms the click was received and processed — the failure is wiring,
+    // not a swallowed event.
+    expect(onPageChange).toHaveBeenCalledWith(1);
+  });
+
   it('supports controlled server pagination with explicit total rows', () => {
     const onPageChange = vi.fn();
     const DataTableAny = DataTable as unknown as (props: Record<string, unknown>) => React.JSX.Element;
