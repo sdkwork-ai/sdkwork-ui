@@ -50,6 +50,17 @@ export interface DataTableColumn<T = any> {
 export interface DataTablePaginationProps {
   defaultPage?: number;
   defaultPageSize?: number;
+  /**
+   * Set for keyset (cursor) server pagination, where the backend publishes no
+   * total row count and only knows whether another page exists.
+   *
+   * Without it the composite has to infer "is there a next page" from
+   * `rowCount`, which a cursor backend cannot supply — the footer would then
+   * either disable Next forever or offer a page count it invented. With it the
+   * composite renders a positional footer (`Page 3`, not `Showing 31-40 of
+   * 52`) and drives Next from this flag instead of arithmetic.
+   */
+  hasMore?: boolean;
   mode?: DataTablePaginationMode;
   onPageChange?: DataTablePageChangeHandler;
   onPageSizeChange?: DataTablePageSizeChangeHandler;

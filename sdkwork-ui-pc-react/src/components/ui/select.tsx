@@ -70,6 +70,20 @@ SelectTrigger.displayName = 'SelectTrigger';
  *  document capture phase (before any dialog overlay handler runs). */
 const OUTSIDE_INTERACTION_EVENTS = ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'touchstart', 'touchend', 'click'] as const;
 
+/** Only the tail of an opening interaction sequence is exempted, and only for
+ *  this long. A pointerdown opens the panel; the events that follow belong to
+ *  the same physical gesture, so they can never be an outside interaction.
+ *  Once the gesture is over, a later interaction outside the panel is genuine
+ *  and must still dismiss. */
+const OPENING_SEQUENCE_GUARD_MS = 700;
+
+/** True when `target` is the select's own trigger, in whatever DOM position it
+ *  currently occupies. */
+function isOwnTrigger(target: EventTarget | null, trigger: Element | null): boolean {
+  if (!(target instanceof Node)) return false;
+  return trigger !== null && (trigger === target || trigger.contains(target));
+}
+
 const SelectContent = React.forwardRef<
   React.ElementRef<typeof SelectPrimitive.Content>,
   SelectContentProps
@@ -77,6 +91,7 @@ const SelectContent = React.forwardRef<
   const contentRef = React.useRef<HTMLDivElement | null>(null);
   const guardListenersRef = React.useRef<Array<[string, (event: Event) => void]>>([]);
   const guardTimerRef = React.useRef<number | undefined>(undefined);
+  const guardStartedAtRef = React.useRef(0);
 
   const detachOutsideGuard = () => {
     for (const [type, handler] of guardListenersRef.current) {
@@ -98,12 +113,27 @@ const SelectContent = React.forwardRef<
     // the document capture phase is a deterministic guard that works
     // regardless of the hosting dialog's z-index or stacking context.
     //
-    // The dismiss happens on `click` — the last event of an outside
-    // interaction sequence (pointerdown → pointerup → mousedown → mouseup →
-    // click) — so every event of the sequence is stopped first; dismissing
-    // earlier would unmount this component and remove the capture listeners,
-    // letting the remaining events fall through to the dialog layer. A
-    // timeout fallback covers touch interactions that never emit a click.
+    // The dismiss happens on the last event of an outside interaction sequence
+    // (pointerdown → pointerup → mousedown → mouseup → click) — so every event
+    // of the sequence is stopped first; dismissing earlier would unmount this
+    // component and remove the capture listeners, letting the remaining events
+    // fall through to the dialog layer. A resettable timeout fallback covers
+    // touch interactions that never emit a click.
+    //
+    // ⚠️ The guard must never dismiss the gesture that OPENED the panel. That
+    // is not detectable from the event target alone: Radix's own
+    // `SelectTrigger.onPointerDown` calls `event.preventDefault()` after
+    // opening, which per the DOM spec suppresses the compatibility mouse
+    // events and makes the browser retarget the trailing `pointerup`/`click`
+    // to the nearest common ancestor — typically `<html>`, NOT the trigger.
+    // Testing only "is the target inside the open trigger" therefore lets the
+    // opening gesture through as an outside interaction and shuts the panel in
+    // the same tick it opened. The gesture is instead recognised by the
+    // pointerdown that starts it: the panel is mounted during that gesture, so
+    // every event within OPENING_SEQUENCE_GUARD_MS of the guard attaching
+    // belongs to the opening sequence.
+    const startedAt = Date.now();
+    guardStartedAtRef.current = startedAt;
     const dismiss = () => {
       if (guardTimerRef.current === undefined) return;
       window.clearTimeout(guardTimerRef.current);
@@ -123,13 +153,15 @@ const SelectContent = React.forwardRef<
       if (!node.isConnected) return;
       const target = event.target;
       if (target instanceof Node && node.contains(target)) return;
-      // A mouse click opens the panel on pointerdown, so the remaining events
-      // of that same interaction (pointerup/mousedown/mouseup/click) still
-      // target the trigger. Radix marks the open trigger with aria-expanded;
-      // events on it are the opening sequence, not an outside interaction, and
-      // must not dismiss the freshly opened panel.
+      // Anything inside the open panel or its own trigger is never outside.
       const openTrigger = document.querySelector('[role="combobox"][aria-expanded="true"]');
-      if (openTrigger && target instanceof Node && openTrigger.contains(target)) return;
+      if (isOwnTrigger(target, openTrigger)) return;
+      // The trailing events of the gesture that opened the panel reach here
+      // with a retargeted `<html>`/`<body>` target (see above). They belong to
+      // the opening sequence and must not dismiss it. Swallow them without
+      // stopping propagation so the browser's own default handling — focusing
+      // the trigger, etc. — is unaffected.
+      if (Date.now() - startedAt < OPENING_SEQUENCE_GUARD_MS) return;
       event.stopPropagation();
       if (event.type === 'click') {
         dismiss();

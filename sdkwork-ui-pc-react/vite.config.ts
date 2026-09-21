@@ -4,6 +4,7 @@ import { createSdkworkCredentialEntryBootstrapVitePlugin } from '@sdkwork/iam-cr
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import dts from 'vite-plugin-dts';
+import { resolveViteEnvironment } from '../../sdkwork-specs/tools/vite-runtime-profile.mjs';
 import { createFrameworkLibEntrySourceMap } from './build/package-contract';
 
 const peerDependencies = ['react', 'react-dom', 'react-hook-form'];

@@ -215,6 +215,48 @@ describe('DataTable', () => {
     expect(screen.queryByText('Asset 21')).not.toBeInTheDocument();
   });
 
+  it('keeps the rows-per-page options open after the real mouse gesture that opens them', async () => {
+    const onPageSizeChange = vi.fn();
+    const DataTableAny = DataTable as unknown as (props: Record<string, unknown>) => React.JSX.Element;
+
+    render(
+      <DataTableAny
+        columns={[{ id: 'name', header: 'Name', cell: (row: AssetRow) => row.name }]}
+        pagination={{ defaultPageSize: 10, onPageSizeChange, pageSizeOptions: [10, 20, 50] }}
+        rows={pagedRows}
+        title="Assets"
+      />,
+    );
+
+    const trigger = screen.getByRole('combobox', { name: 'Rows per page' });
+    // A real mouse click opens the Radix panel on pointerdown. Radix then calls
+    // preventDefault(), so the browser suppresses the compatibility mouse events
+    // and retargets the trailing pointerup/click to <html>. Regression: the
+    // outside-interaction guard read that retargeted click as an outside
+    // interaction and dismissed the panel the instant it opened, making the
+    // page-size dropdown unusable.
+    trigger.dispatchEvent(
+      new PointerEvent('pointerdown', {
+        bubbles: true,
+        button: 0,
+        cancelable: true,
+        pointerId: 1,
+        pointerType: 'mouse',
+      }),
+    );
+    await screen.findByRole('listbox');
+    fireEvent.pointerUp(document.documentElement, { button: 0, pointerId: 1, pointerType: 'mouse' });
+    fireEvent.click(document.documentElement, { button: 0 });
+
+    // Survive the guard's dismiss window.
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    expect(screen.queryByRole('listbox')).toBeTruthy();
+    expect(screen.getByRole('option', { name: '20' })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('option', { name: '20' }));
+    expect(onPageSizeChange).toHaveBeenCalledWith(20);
+  });
+
   it('supports controlled server pagination with explicit total rows', () => {
     const onPageChange = vi.fn();
     const DataTableAny = DataTable as unknown as (props: Record<string, unknown>) => React.JSX.Element;
@@ -251,6 +293,102 @@ describe('DataTable', () => {
 
     expect(onPageChange).toHaveBeenNthCalledWith(1, 4);
     expect(onPageChange).toHaveBeenNthCalledWith(2, 6);
+  });
+
+  /**
+   * Keyset (cursor) server pagination.
+   *
+   * The backend knows only `hasMore`; it publishes no total, so a "Showing X-Y
+   * of Z" summary would have to treat the current page length as Z and a
+   * numbered page list would offer pages that may not exist. The contract is
+   * therefore a page ordinal plus a Next that the backend's own flag gates.
+   */
+  it('supports cursor server pagination driven by the backend hasMore flag', () => {
+    const onPageChange = vi.fn();
+    const DataTableAny = DataTable as unknown as (props: Record<string, unknown>) => React.JSX.Element;
+    const serverRows = Array.from({ length: 10 }, (_, index) => ({
+      id: `asset-${index + 21}`,
+      name: `Asset ${index + 21}`,
+      owner: `Owner ${index + 21}`,
+      status: index % 2 === 0 ? 'Ready' : 'Review',
+    }));
+
+    const { rerender } = render(
+      <DataTableAny
+        columns={[
+          { id: 'name', header: 'Name', cell: (row: AssetRow) => row.name },
+          { id: 'owner', header: 'Owner', cell: (row: AssetRow) => row.owner },
+        ]}
+        pagination={{
+          hasMore: true,
+          mode: 'server',
+          onPageChange,
+          page: 2,
+          pageSize: 10,
+        }}
+        rows={serverRows}
+        title="Assets"
+      />,
+    );
+
+    // The ordinal replaces the page list; no invented total is rendered.
+    expect(screen.getByText('Page 2')).toBeInTheDocument();
+    expect(screen.queryByText(/^Showing /)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Page 3' })).not.toBeInTheDocument();
+
+    expect(screen.getByRole('button', { name: 'Next page' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Next page' }));
+    expect(onPageChange).toHaveBeenCalledWith(3);
+
+    // Previous stays available from page 2; only page 1 disables it.
+    expect(screen.getByRole('button', { name: 'Previous page' })).toBeEnabled();
+
+    // Once the backend reports no further page, Next is disabled — the flag,
+    // not arithmetic on a row count the client never received, gates it.
+    rerender(
+      <DataTableAny
+        columns={[
+          { id: 'name', header: 'Name', cell: (row: AssetRow) => row.name },
+          { id: 'owner', header: 'Owner', cell: (row: AssetRow) => row.owner },
+        ]}
+        pagination={{
+          hasMore: false,
+          mode: 'server',
+          onPageChange,
+          page: 3,
+          pageSize: 10,
+        }}
+        rows={serverRows}
+        title="Assets"
+      />,
+    );
+
+    expect(screen.getByText('Page 3')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Next page' })).toBeDisabled();
+  });
+
+  it('keeps the cursor pagination footer reachable on a short final page', () => {
+    const DataTableAny = DataTable as unknown as (props: Record<string, unknown>) => React.JSX.Element;
+
+    render(
+      <DataTableAny
+        columns={[
+          { id: 'name', header: 'Name', cell: (row: AssetRow) => row.name },
+        ]}
+        pagination={{
+          hasMore: false,
+          mode: 'server',
+          onPageChange: vi.fn(),
+          page: 4,
+          pageSize: 10,
+        }}
+        rows={[pagedRows[0]]}
+        title="Assets"
+      />,
+    );
+
+    expect(screen.getByText('Page 4')).toBeInTheDocument();
+    expect(document.body.querySelector('[data-slot="data-table-pagination"]')).toBeInTheDocument();
   });
 
   it('supports accessible client-side sorting and resets pagination when sort order changes', () => {

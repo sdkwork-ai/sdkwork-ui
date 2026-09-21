@@ -175,11 +175,25 @@ const DataTable: DataTableComponent = React.forwardRef<HTMLDivElement, DataTable
   const totalRowCount = pagination?.mode === 'server'
     ? pagination.rowCount ?? rows.length
     : rows.length;
-  const pageCount = pagination
+  /**
+   * Keyset (cursor) server pagination: the backend has no total, so the page
+   * count is unknown and Next is driven by `pagination.hasMore` rather than by
+   * `Math.ceil(totalRowCount / pageSize)`. `pageCount` stays `undefined` in
+   * that mode so no caller can accidentally render an invented page count.
+   */
+  const cursorPagination = pagination?.mode === 'server' && pagination.hasMore !== undefined;
+  const pageCount = pagination && !cursorPagination
     ? Math.max(1, Math.ceil(Math.max(totalRowCount, 1) / resolvedPageSize))
-    : 1;
+    : undefined;
+  /**
+   * Upper bound used to clamp the controlled page. A cursor backend cannot
+   * clamp against a page count it never receives, so the bound is "current page
+   * plus one while another page exists" — enough to reject a page jump past the
+   * end without forbidding the step onto the last, real page.
+   */
+  const pageBound = pageCount ?? Math.max(1, (pagination?.page ?? uncontrolledPage) + (pagination?.hasMore ? 1 : 0));
   const resolvedPage = pagination ? pagination.page ?? uncontrolledPage : 1;
-  const currentPage = pagination ? clampPage(resolvedPage, pageCount) : 1;
+  const currentPage = pagination ? clampPage(resolvedPage, pageBound) : 1;
   const resolvedPageSizeOptions = pagination
     ? resolvePageSizeOptions(pagination.pageSizeOptions, resolvedPageSize)
     : [];
@@ -214,7 +228,7 @@ const DataTable: DataTableComponent = React.forwardRef<HTMLDivElement, DataTable
       return;
     }
 
-    const clampedPage = clampPage(nextPage, pageCount);
+    const clampedPage = clampPage(nextPage, pageBound);
 
     if (pagination.page === undefined) {
       setUncontrolledPage(clampedPage);
@@ -305,9 +319,20 @@ const DataTable: DataTableComponent = React.forwardRef<HTMLDivElement, DataTable
     displayedRowIds.length > 0 && displayedRowIds.every((rowId) => selectedRowIdSet.has(String(rowId)));
   const someRowsSelected =
     !allRowsSelected && displayedRowIds.some((rowId) => selectedRowIdSet.has(String(rowId)));
-  const paginationSummary = displayedRows.length > 0
-    ? `Showing ${(currentPage - 1) * resolvedPageSize + 1}-${(currentPage - 1) * resolvedPageSize + displayedRows.length} of ${totalRowCount}`
-    : `Showing 0-0 of ${totalRowCount}`;
+  /**
+   * Footer summary.
+   *
+   * Offset pagination knows the total, so it reports a range. Cursor
+   * pagination does not: `totalRowCount` would fall back to the length of the
+   * current page, and `Showing 21-30 of 10` is worse than no range at all. The
+   * page ordinal is rendered once, by the navigation controls, so cursor mode
+   * contributes no summary here rather than repeating it.
+   */
+  const paginationSummary = cursorPagination
+    ? undefined
+    : displayedRows.length > 0
+      ? `Showing ${(currentPage - 1) * resolvedPageSize + 1}-${(currentPage - 1) * resolvedPageSize + displayedRows.length} of ${totalRowCount}`
+      : `Showing 0-0 of ${totalRowCount}`;
 
   React.useEffect(() => {
     if (!pagination || pagination.page !== undefined) {
@@ -357,10 +382,16 @@ const DataTable: DataTableComponent = React.forwardRef<HTMLDivElement, DataTable
     );
   }
 
-  const hasPagination = !!pagination && totalRowCount > 0;
+  // A cursor backend publishes `hasMore` but no total, so `totalRowCount`
+  // degrades to the current page length and the `> 0` test would hide the
+  // footer exactly when the last page is short. Cursor mode therefore keys off
+  // the page itself, not off a row count it cannot receive.
+  const hasPagination = !!pagination && (cursorPagination ? rows.length > 0 || currentPage > 1 : totalRowCount > 0);
   const hasFooter = !!footer || hasPagination;
   const hasPageSizeSelector = hasPagination && resolvedPageSizeOptions.length > 1;
-  const paginationItems = hasPagination ? resolvePaginationItems(currentPage, pageCount) : [];
+  const paginationItems = hasPagination && pageCount !== undefined
+    ? resolvePaginationItems(currentPage, pageCount)
+    : [];
   const headerGroup = table.getHeaderGroups()[0];
 
   return (
@@ -580,7 +611,7 @@ const DataTable: DataTableComponent = React.forwardRef<HTMLDivElement, DataTable
           >
             <div className={dataTableSummaryClassName}>
               {footer}
-              {hasPagination ? <span>{paginationSummary}</span> : null}
+              {hasPagination && paginationSummary !== undefined ? <span>{paginationSummary}</span> : null}
             </div>
             {hasPagination ? (
               <div
@@ -592,10 +623,11 @@ const DataTable: DataTableComponent = React.forwardRef<HTMLDivElement, DataTable
               >
                 <DataTablePaginationControls
                   currentPage={currentPage}
+                  hasNextPage={cursorPagination ? !!pagination?.hasMore : pageCount !== undefined && currentPage < pageCount}
+                  hasPageNumberList={pageCount !== undefined}
                   hasPageSizeSelector={hasPageSizeSelector}
                   onPageChange={handlePageChange}
                   onPageSizeChange={handlePageSizeChange}
-                  pageCount={pageCount}
                   pageSizeOptions={resolvedPageSizeOptions}
                   paginationItems={paginationItems}
                   resolvedPageSize={resolvedPageSize}

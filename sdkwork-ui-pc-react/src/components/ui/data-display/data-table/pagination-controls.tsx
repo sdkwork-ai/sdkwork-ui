@@ -22,10 +22,22 @@ import type { DataTablePaginationItem } from './state';
 
 export interface DataTablePaginationControlsProps {
   currentPage: number;
+  /**
+   * Whether a further page exists. Offset pagination derives this from the page
+   * count; keyset (cursor) pagination receives it from the backend, which is the
+   * only party that knows.
+   */
+  hasNextPage: boolean;
+  /**
+   * False for keyset pagination, where the backend publishes no total row count
+   * and therefore no page count: the numbered page buttons are replaced by the
+   * current page ordinal so the footer never offers a page the backend may not
+   * have.
+   */
+  hasPageNumberList: boolean;
   hasPageSizeSelector: boolean;
   onPageChange: (page: number) => void;
   onPageSizeChange: (value: string) => void;
-  pageCount: number;
   paginationItems: DataTablePaginationItem[];
   pageSizeOptions: readonly number[];
   resolvedPageSize: number;
@@ -33,10 +45,11 @@ export interface DataTablePaginationControlsProps {
 
 export function DataTablePaginationControls({
   currentPage,
+  hasNextPage,
+  hasPageNumberList,
   hasPageSizeSelector,
   onPageChange,
   onPageSizeChange,
-  pageCount,
   paginationItems,
   pageSizeOptions,
   resolvedPageSize,
@@ -78,30 +91,44 @@ export function DataTablePaginationControls({
               Previous
             </Button>
           </PaginationItem>
-          {paginationItems.map((item, itemIndex) => (
-            <PaginationItem key={`${item}-${itemIndex}`}>
-              {typeof item === 'number' ? (
-                <Button
-                  aria-current={item === currentPage ? 'page' : undefined}
-                  aria-label={`Page ${item}`}
-                  className={dataTablePaginationButtonClassName}
-                  onClick={() => onPageChange(item)}
-                  size="sm"
-                  type="button"
-                  variant={item === currentPage ? 'secondary' : 'ghost'}
-                >
-                  {item}
-                </Button>
-              ) : (
-                <PaginationEllipsis />
-              )}
+          {hasPageNumberList ? (
+            paginationItems.map((item, itemIndex) => (
+              <PaginationItem key={`${item}-${itemIndex}`}>
+                {typeof item === 'number' ? (
+                  <Button
+                    aria-current={item === currentPage ? 'page' : undefined}
+                    aria-label={`Page ${item}`}
+                    className={dataTablePaginationButtonClassName}
+                    onClick={() => onPageChange(item)}
+                    size="sm"
+                    type="button"
+                    variant={item === currentPage ? 'secondary' : 'ghost'}
+                  >
+                    {item}
+                  </Button>
+                ) : (
+                  <PaginationEllipsis />
+                )}
+              </PaginationItem>
+            ))
+          ) : (
+            <PaginationItem>
+              <span
+                aria-current="page"
+                aria-label={`Page ${currentPage}`}
+                className="whitespace-nowrap px-2 text-sm text-[var(--sdk-color-text-secondary)]"
+                data-sdk-region="data-table-page-ordinal"
+                data-slot="data-table-page-ordinal"
+              >
+                Page {currentPage}
+              </span>
             </PaginationItem>
-          ))}
+          )}
           <PaginationItem>
             <Button
               aria-label="Next page"
               className={dataTablePaginationButtonClassName}
-              disabled={currentPage >= pageCount}
+              disabled={!hasNextPage}
               onClick={() => onPageChange(currentPage + 1)}
               size="sm"
               type="button"
