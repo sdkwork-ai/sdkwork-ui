@@ -28,6 +28,8 @@ export type DataTableRowPropsResolver<T = any> = (row: T, index: number) => Data
 export type DataTableRowSelectionLabelResolver<T = any> = (row: T, index: number) => string;
 export type DataTableRowActionsRenderer<T = any> = (row: T, index: number) => React.ReactNode;
 export type DataTableRowClickHandler<T = any> = (row: T, index: number) => void;
+export type DataTableRowExpandLabelResolver<T = any> = (row: T, index: number, expanded: boolean) => string;
+export type DataTableExpandedRowRenderer<T = any> = (row: T, index: number) => React.ReactNode;
 export type DataTableSelectedRowIdsChangeHandler = (ids: React.Key[]) => void;
 export type DataTablePageChangeHandler = (page: number) => void;
 export type DataTablePageSizeChangeHandler = (pageSize: number) => void;
@@ -93,12 +95,26 @@ export interface DataTableProps<T = any> extends Omit<React.HTMLAttributes<HTMLD
   getRowId?: DataTableRowIdResolver<T>;
   getRowProps?: DataTableRowPropsResolver<T>;
   getRowSelectionLabel?: DataTableRowSelectionLabelResolver<T>;
+  /**
+   * Accessible label for a row's disclosure state, read by screen readers off
+   * the expandable row. Only consulted when `renderExpandedRow` is provided.
+   */
+  getRowExpandLabel?: DataTableRowExpandLabelResolver<T>;
   loading?: boolean;
   loadingLabel?: React.ReactNode;
   onRowClick?: DataTableRowClickHandler<T>;
   onSelectedRowIdsChange?: DataTableSelectedRowIdsChangeHandler;
   onSortingChange?: DataTableSortingChangeHandler;
   pagination?: DataTablePaginationProps;
+  /**
+   * Expanded detail for one row. Providing it turns every body row into a
+   * disclosure: the row's click toggles its own expansion (one row at a time)
+   * and `onRowClick` is not invoked, so a row can never be both a disclosure
+   * and a click target.
+   */
+  renderExpandedRow?: DataTableExpandedRowRenderer<T>;
+  /** Heading rendered inside the expanded detail panel. */
+  rowDetailLabel?: React.ReactNode;
   rowActions?: DataTableRowActionsRenderer<T>;
   rowActionsLabel?: React.ReactNode;
   rows: T[];

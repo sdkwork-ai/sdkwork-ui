@@ -50,11 +50,12 @@ import type {
 export type {
   DataTableAccessorResolver,
   DataTableAlign,
-  DataTableCellProps,
   DataTableCellPropsResolver,
+  DataTableCellProps,
   DataTableCellRenderer,
   DataTableColumn,
   DataTableDensity,
+  DataTableExpandedRowRenderer,
   DataTableHeaderProps,
   DataTablePageChangeHandler,
   DataTablePageSizeChangeHandler,
@@ -63,6 +64,7 @@ export type {
   DataTableRegionSlotProps,
   DataTableRowActionsRenderer,
   DataTableRowClickHandler,
+  DataTableRowExpandLabelResolver,
   DataTableRowIdResolver,
   DataTableRowProps,
   DataTableRowPropsResolver,
@@ -143,6 +145,7 @@ const DataTable: DataTableComponent = React.forwardRef<HTMLDivElement, DataTable
   emptyTitle = 'No rows',
   footer,
   getRowId = defaultGetRowId,
+  getRowExpandLabel,
   getRowProps,
   getRowSelectionLabel,
   loading = false,
@@ -151,8 +154,10 @@ const DataTable: DataTableComponent = React.forwardRef<HTMLDivElement, DataTable
   onSelectedRowIdsChange,
   onSortingChange,
   pagination,
+  renderExpandedRow,
   rowActions,
   rowActionsLabel = 'Actions',
+  rowDetailLabel,
   rows,
   selectable = false,
   selectedRowIds = [],
@@ -170,6 +175,18 @@ const DataTable: DataTableComponent = React.forwardRef<HTMLDivElement, DataTable
     normalizePageSize(pagination?.defaultPageSize ?? 10),
   );
   const [uncontrolledSorting, setUncontrolledSorting] = React.useState(() => normalizeSortingState(defaultSorting));
+  /**
+   * Row expansion. One row open at a time: the expanded panel is a detail
+   * view of a master list, so opening a second row collapses the first. The
+   * expansion is uncontrolled — a caller that needs controlled state already
+   * owns the rows and can remount via `getRowId` changes.
+   */
+  const [expandedRowId, setExpandedRowId] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    if (expandedRowId !== null && !renderExpandedRow) {
+      setExpandedRowId(null);
+    }
+  }, [expandedRowId, renderExpandedRow]);
 
   const resolvedPageSize = normalizePageSize(pagination?.pageSize ?? uncontrolledPageSize);
   const totalRowCount = pagination?.mode === 'server'
@@ -382,6 +399,28 @@ const DataTable: DataTableComponent = React.forwardRef<HTMLDivElement, DataTable
     );
   }
 
+  /**
+   * Row click with an expanded-detail row present: the click is the
+   * disclosure, so it toggles the row's own expansion and never reaches
+   * `onRowClick` — a row cannot be both a disclosure and a click target.
+   * Expansion toggles single-open: opening a row collapses the previous one.
+   */
+  const expandableRows = typeof renderExpandedRow === 'function';
+
+  function handleRowDisclosure(rowId: React.Key) {
+    const normalizedRowId = String(rowId);
+    setExpandedRowId((current) => (current === normalizedRowId ? null : normalizedRowId));
+  }
+
+  function handleRowActivation(row: any, index: number, rowId: React.Key) {
+    if (expandableRows) {
+      handleRowDisclosure(rowId);
+      return;
+    }
+
+    onRowClick?.(row, index);
+  }
+
   // A cursor backend publishes `hasMore` but no total, so `totalRowCount`
   // degrades to the current page length and the `> 0` test would hide the
   // footer exactly when the last page is short. Cursor mode therefore keys off
@@ -525,73 +564,112 @@ const DataTable: DataTableComponent = React.forwardRef<HTMLDivElement, DataTable
                 const row = tableRow.original;
                 const index = tableRow.index;
                 const rowId = getRowId(row, index);
-                const selected = selectedRowIdSet.has(String(rowId));
+                const normalizedRowId = String(rowId);
+                const selected = selectedRowIdSet.has(normalizedRowId);
                 const rowSelectionLabel = getRowSelectionLabel?.(row, index) ?? String(rowId);
                 const resolvedRowProps = getRowProps?.(row, index);
+                const expanded = expandableRows && expandedRowId === normalizedRowId;
+                const rowExpandLabel = expandableRows
+                  ? getRowExpandLabel?.(row, index, expanded) ?? normalizedRowId
+                  : undefined;
+                const detailColumnCount =
+                  (selectable ? 1 : 0)
+                  + tableRow.getVisibleCells().length
+                  + (rowActions ? 1 : 0);
 
                 return (
-                  <TableRow
-                    {...mergeSlotProps<DataTableRowProps>(
-                      {
-                        className: cn(
-                          'hover:bg-[var(--sdk-color-brand-primary-soft)]',
-                          onRowClick ? 'cursor-pointer' : null,
-                        ),
-                        'data-sdk-row-id': String(rowId),
-                        'data-state': selected ? 'selected' : 'unselected',
-                      },
-                      resolvedRowProps,
-                    )}
-                    key={String(rowId)}
-                    onClick={onRowClick ? () => onRowClick(row, index) : undefined}
-                  >
-                    {selectable ? (
-                      <TableCell className={densityClassName[density]}>
-                        <Checkbox
-                          aria-label={`Select row ${rowSelectionLabel}`}
-                          checked={selected}
-                          onCheckedChange={(checked) => handleToggleRow(rowId, checked)}
-                          onClick={(event) => event.stopPropagation()}
-                        />
-                      </TableCell>
-                    ) : null}
-                    {tableRow.getVisibleCells().map((cell) => {
-                      const column = columnMap.get(cell.column.id);
+                  <React.Fragment key={normalizedRowId}>
+                    <TableRow
+                      {...mergeSlotProps<DataTableRowProps>(
+                        {
+                          className: cn(
+                            'hover:bg-[var(--sdk-color-brand-primary-soft)]',
+                            onRowClick || expandableRows ? 'cursor-pointer' : null,
+                          ),
+                          'aria-expanded': expandableRows ? expanded : undefined,
+                          'aria-label': rowExpandLabel,
+                          'data-sdk-row-id': normalizedRowId,
+                          'data-state': selected ? 'selected' : 'unselected',
+                          tabIndex: expandableRows ? 0 : undefined,
+                        },
+                        resolvedRowProps,
+                      )}
+                      onClick={onRowClick || expandableRows ? () => handleRowActivation(row, index, rowId) : undefined}
+                      onKeyDown={expandableRows
+                        ? (event: React.KeyboardEvent<HTMLTableRowElement>) => {
+                          if (event.target !== event.currentTarget) {
+                            return;
+                          }
 
-                      if (!column) {
-                        return null;
-                      }
-
-                      const resolvedCellProps =
-                        typeof column.cellProps === 'function'
-                          ? column.cellProps(row, index)
-                          : column.cellProps;
-
-                      return (
-                        <TableCell
-                          {...mergeSlotProps<DataTableCellProps>(
-                            {
-                              className: cn(
-                                densityClassName[density],
-                                alignClassName[column.align ?? 'left'],
-                              ),
-                            },
-                            resolvedCellProps,
-                          )}
-                          key={cell.id}
-                        >
-                          {column.cell(row, index)}
+                          if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault();
+                            handleRowDisclosure(rowId);
+                          }
+                        }
+                        : undefined}
+                    >
+                      {selectable ? (
+                        <TableCell className={densityClassName[density]}>
+                          <Checkbox
+                            aria-label={`Select row ${rowSelectionLabel}`}
+                            checked={selected}
+                            onCheckedChange={(checked) => handleToggleRow(rowId, checked)}
+                            onClick={(event) => event.stopPropagation()}
+                          />
                         </TableCell>
-                      );
-                    })}
-                    {rowActions ? (
-                      <TableCell className={cn(densityClassName[density], 'text-right')}>
-                        <div className="flex justify-end" onClick={(event) => event.stopPropagation()}>
-                          {rowActions(row, index)}
-                        </div>
-                      </TableCell>
+                      ) : null}
+                      {tableRow.getVisibleCells().map((cell) => {
+                        const column = columnMap.get(cell.column.id);
+
+                        if (!column) {
+                          return null;
+                        }
+
+                        const resolvedCellProps =
+                          typeof column.cellProps === 'function'
+                            ? column.cellProps(row, index)
+                            : column.cellProps;
+
+                        return (
+                          <TableCell
+                            {...mergeSlotProps<DataTableCellProps>(
+                              {
+                                className: cn(
+                                  densityClassName[density],
+                                  alignClassName[column.align ?? 'left'],
+                                ),
+                              },
+                              resolvedCellProps,
+                            )}
+                            key={cell.id}
+                          >
+                            {column.cell(row, index)}
+                          </TableCell>
+                        );
+                      })}
+                      {rowActions ? (
+                        <TableCell className={cn(densityClassName[density], 'text-right')}>
+                          <div className="flex justify-end" onClick={(event) => event.stopPropagation()}>
+                            {rowActions(row, index)}
+                          </div>
+                        </TableCell>
+                      ) : null}
+                    </TableRow>
+                    {expanded ? (
+                      <TableRow data-state="expanded" data-sdk-row-id={`${normalizedRowId}-detail`}>
+                        <TableCell colSpan={detailColumnCount}>
+                          {rowDetailLabel ? (
+                            <div className="mb-2 text-sm font-semibold text-[var(--sdk-color-text-secondary)]" data-slot="data-table-row-detail-label">
+                              {rowDetailLabel}
+                            </div>
+                          ) : null}
+                          <div onClick={(event) => event.stopPropagation()}>
+                            {renderExpandedRow?.(row, index)}
+                          </div>
+                        </TableCell>
+                      </TableRow>
                     ) : null}
-                  </TableRow>
+                  </React.Fragment>
                 );
               })}
             </TableBody>

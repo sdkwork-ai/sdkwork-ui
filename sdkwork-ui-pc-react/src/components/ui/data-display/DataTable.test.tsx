@@ -451,6 +451,45 @@ describe('DataTable', () => {
     expect(document.body.querySelector('[data-slot="data-table-pagination"]')).toBeInTheDocument();
   });
 
+  it('expands one row at a time through the row disclosure and never fires onRowClick', () => {
+    const onRowClick = vi.fn();
+
+    render(
+      <DataTable<AssetRow>
+        columns={[
+          { id: 'name', header: 'Name', cell: (row) => row.name },
+          { id: 'owner', header: 'Owner', cell: (row) => row.owner },
+        ]}
+        getRowExpandLabel={(row, _index, expanded) => `${expanded ? 'Collapse' : 'Expand'} ${row.name}`}
+        getRowId={(row) => row.id}
+        onRowClick={onRowClick}
+        renderExpandedRow={(row) => <div>{`Detail of ${row.name}`}</div>}
+        rowDetailLabel="Detail"
+        rows={rows}
+      />,
+    );
+
+    const firstRow = screen.getByText('Launch Brief').closest('tr');
+    expect(firstRow).toHaveAttribute('aria-expanded', 'false');
+
+    fireEvent.click(screen.getByText('Launch Brief'));
+    expect(screen.getByText('Detail of Launch Brief')).toBeInTheDocument();
+    expect(screen.getByText('Detail')).toBeInTheDocument();
+    expect(screen.getByText('Launch Brief').closest('tr')).toHaveAttribute('aria-expanded', 'true');
+
+    // Opening the second row collapses the first: the expanded panel is the
+    // detail view of a master list, not a second open drawer.
+    fireEvent.click(screen.getByText('Moodboard'));
+    expect(screen.queryByText('Detail of Launch Brief')).not.toBeInTheDocument();
+    expect(screen.getByText('Detail of Moodboard')).toBeInTheDocument();
+
+    // Collapsing again removes the panel.
+    fireEvent.click(screen.getByText('Moodboard'));
+    expect(screen.queryByText('Detail of Moodboard')).not.toBeInTheDocument();
+
+    expect(onRowClick).not.toHaveBeenCalled();
+  });
+
   it('supports accessible client-side sorting and resets pagination when sort order changes', () => {
     const onSortingChange = vi.fn();
     const DataTableAny = DataTable as unknown as (props: Record<string, unknown>) => React.JSX.Element;
