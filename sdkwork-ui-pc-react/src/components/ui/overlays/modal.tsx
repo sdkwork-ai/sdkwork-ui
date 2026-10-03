@@ -1,4 +1,4 @@
-﻿import * as React from 'react';
+import * as React from 'react';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { cva, type VariantProps } from 'class-variance-authority';
 import { AlertTriangle, X } from 'lucide-react';
@@ -175,7 +175,15 @@ const ModalDescription = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <DialogPrimitive.Description
     ref={ref}
-    className={cn('text-sm text-[var(--sdk-color-text-secondary)]', className)}
+    /*
+     * `break-words`：描述里经常插入不可断的长值（哈希文件名、资源 id、URL）。没有它时，
+     * 浏览器为了塞下这个长词会把前面的中文句子断在任意两个字之间——出现过「删」独占一行
+     * 的排版事故。允许在词内断行后，句子与长值各自成行。
+     */
+    className={cn(
+      'text-sm break-words text-[var(--sdk-color-text-secondary)]',
+      className,
+    )}
     data-sdk-ui="modal-description"
     data-slot="modal-description"
     {...props}
