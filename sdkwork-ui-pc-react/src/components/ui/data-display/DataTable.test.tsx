@@ -472,8 +472,16 @@ describe('DataTable', () => {
     const firstRow = screen.getByText('Launch Brief').closest('tr');
     expect(firstRow).toHaveAttribute('aria-expanded', 'false');
 
+    // The disclosure column leads the row (before any selectable checkbox and
+    // the data columns), with a screen-reader-only header from
+    // `rowDetailLabel`.
+    const headers = Array.from((firstRow as HTMLElement).closest('table')!.querySelectorAll('th'))
+      .map((cell) => cell.textContent?.trim() ?? '');
+    expect(headers[0]).toBe('Detail');
+
     fireEvent.click(screen.getByText('Launch Brief'));
     expect(screen.getByText('Detail of Launch Brief')).toBeInTheDocument();
+    expect(document.querySelector('[data-slot="data-table-expanded-row"]')).not.toBeNull();
     expect(screen.getByText('Detail')).toBeInTheDocument();
     expect(screen.getByText('Launch Brief').closest('tr')).toHaveAttribute('aria-expanded', 'true');
 

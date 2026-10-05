@@ -175,18 +175,6 @@ const DataTable: DataTableComponent = React.forwardRef<HTMLDivElement, DataTable
     normalizePageSize(pagination?.defaultPageSize ?? 10),
   );
   const [uncontrolledSorting, setUncontrolledSorting] = React.useState(() => normalizeSortingState(defaultSorting));
-  /**
-   * Row expansion. One row open at a time: the expanded panel is a detail
-   * view of a master list, so opening a second row collapses the first. The
-   * expansion is uncontrolled — a caller that needs controlled state already
-   * owns the rows and can remount via `getRowId` changes.
-   */
-  const [expandedRowId, setExpandedRowId] = React.useState<string | null>(null);
-  React.useEffect(() => {
-    if (expandedRowId !== null && !renderExpandedRow) {
-      setExpandedRowId(null);
-    }
-  }, [expandedRowId, renderExpandedRow]);
 
   const resolvedPageSize = normalizePageSize(pagination?.pageSize ?? uncontrolledPageSize);
   const totalRowCount = pagination?.mode === 'server'
@@ -351,6 +339,41 @@ const DataTable: DataTableComponent = React.forwardRef<HTMLDivElement, DataTable
       ? `Showing ${(currentPage - 1) * resolvedPageSize + 1}-${(currentPage - 1) * resolvedPageSize + displayedRows.length} of ${totalRowCount}`
       : `Showing 0-0 of ${totalRowCount}`;
 
+  /**
+   * Row expansion. One row open at a time: the expanded panel is a detail
+   * view of a master list, so opening a second row collapses the first. The
+   * expansion is uncontrolled — a caller that needs controlled state already
+   * owns the rows and can remount via `getRowId` changes.
+   */
+  const [expandedRowId, setExpandedRowId] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    if (expandedRowId !== null && !renderExpandedRow) {
+      setExpandedRowId(null);
+    }
+  }, [expandedRowId, renderExpandedRow]);
+  const expandableRows = typeof renderExpandedRow === 'function';
+
+  function handleRowDisclosure(rowId: React.Key) {
+    const normalizedRowId = String(rowId);
+    setExpandedRowId((current) => (current === normalizedRowId ? null : normalizedRowId));
+  }
+
+  /**
+   * Row click with an expanded-detail row present: the click is the
+   * disclosure, so it toggles the row's own expansion and never reaches
+   * `onRowClick` — a row cannot be both a disclosure and a click target, and
+   * disclosure must not select the row either (the checkbox stays the
+   * selection control).
+   */
+  function handleRowActivation(row: any, index: number, rowId: React.Key) {
+    if (expandableRows) {
+      handleRowDisclosure(rowId);
+      return;
+    }
+
+    onRowClick?.(row, index);
+  }
+
   React.useEffect(() => {
     if (!pagination || pagination.page !== undefined) {
       return;
@@ -397,28 +420,6 @@ const DataTable: DataTableComponent = React.forwardRef<HTMLDivElement, DataTable
     handleSelectedRowIdsChange(
       selectedRowIds.filter((selectedRowId) => String(selectedRowId) !== String(rowId)),
     );
-  }
-
-  /**
-   * Row click with an expanded-detail row present: the click is the
-   * disclosure, so it toggles the row's own expansion and never reaches
-   * `onRowClick` — a row cannot be both a disclosure and a click target.
-   * Expansion toggles single-open: opening a row collapses the previous one.
-   */
-  const expandableRows = typeof renderExpandedRow === 'function';
-
-  function handleRowDisclosure(rowId: React.Key) {
-    const normalizedRowId = String(rowId);
-    setExpandedRowId((current) => (current === normalizedRowId ? null : normalizedRowId));
-  }
-
-  function handleRowActivation(row: any, index: number, rowId: React.Key) {
-    if (expandableRows) {
-      handleRowDisclosure(rowId);
-      return;
-    }
-
-    onRowClick?.(row, index);
   }
 
   // A cursor backend publishes `hasMore` but no total, so `totalRowCount`
@@ -478,17 +479,17 @@ const DataTable: DataTableComponent = React.forwardRef<HTMLDivElement, DataTable
         </div>
       ) : null}
 
-      {selectedRowCount > 0 ? (
+      {selectionBar && selectedRowCount > 0 ? (
         <BulkActionBar
-          actions={selectionBar?.actions}
-          clearLabel={selectionBar?.clearLabel}
+          actions={selectionBar.actions}
+          clearLabel={selectionBar.clearLabel}
           count={selectedRowCount}
-          description={selectionBar?.description}
-          meta={selectionBar?.meta}
+          description={selectionBar.description}
+          meta={selectionBar.meta}
           onClear={onSelectedRowIdsChange ? () => handleSelectedRowIdsChange([]) : undefined}
-          sticky={selectionBar?.sticky}
-          title={selectionBar?.title ?? 'Selected rows'}
-          tone={selectionBar?.tone}
+          sticky={selectionBar.sticky}
+          title={selectionBar.title ?? 'Selected rows'}
+          tone={selectionBar.tone}
         />
       ) : null}
 
@@ -527,6 +528,11 @@ const DataTable: DataTableComponent = React.forwardRef<HTMLDivElement, DataTable
                       checked={allRowsSelected ? true : someRowsSelected ? 'indeterminate' : false}
                       onCheckedChange={handleToggleAllRows}
                     />
+                  </TableHead>
+                ) : null}
+                {expandableRows ? (
+                  <TableHead className={cn('w-12', stickyHeader ? 'sticky top-0 z-10 bg-[var(--sdk-color-surface-panel)]' : null)}>
+                    <span className="sr-only">{rowDetailLabel}</span>
                   </TableHead>
                 ) : null}
                 {headerGroup?.headers
@@ -573,7 +579,8 @@ const DataTable: DataTableComponent = React.forwardRef<HTMLDivElement, DataTable
                   ? getRowExpandLabel?.(row, index, expanded) ?? normalizedRowId
                   : undefined;
                 const detailColumnCount =
-                  (selectable ? 1 : 0)
+                  1
+                  + (selectable ? 1 : 0)
                   + tableRow.getVisibleCells().length
                   + (rowActions ? 1 : 0);
 
@@ -618,6 +625,30 @@ const DataTable: DataTableComponent = React.forwardRef<HTMLDivElement, DataTable
                           />
                         </TableCell>
                       ) : null}
+                      {expandableRows ? (
+                        <TableCell className={densityClassName[density]} data-slot="data-table-row-disclosure">
+                          <button
+                            aria-expanded={expanded}
+                            aria-label={rowExpandLabel}
+                            className="inline-flex h-5 w-5 items-center justify-center rounded-[var(--sdk-radius-control)] text-[var(--sdk-color-text-secondary)] transition-colors hover:bg-[var(--sdk-color-brand-primary-soft)] hover:text-[var(--sdk-color-text-primary)]"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              handleRowDisclosure(rowId);
+                            }}
+                            type="button"
+                          >
+                            <span
+                              aria-hidden="true"
+                              className={cn(
+                                'inline-block transition-transform',
+                                expanded ? 'rotate-90' : null,
+                              )}
+                            >
+                              ›
+                            </span>
+                          </button>
+                        </TableCell>
+                      ) : null}
                       {tableRow.getVisibleCells().map((cell) => {
                         const column = columnMap.get(cell.column.id);
 
@@ -656,13 +687,8 @@ const DataTable: DataTableComponent = React.forwardRef<HTMLDivElement, DataTable
                       ) : null}
                     </TableRow>
                     {expanded ? (
-                      <TableRow data-state="expanded" data-sdk-row-id={`${normalizedRowId}-detail`}>
+                      <TableRow data-slot="data-table-expanded-row" data-state="expanded" data-sdk-row-id={`${normalizedRowId}-detail`}>
                         <TableCell colSpan={detailColumnCount}>
-                          {rowDetailLabel ? (
-                            <div className="mb-2 text-sm font-semibold text-[var(--sdk-color-text-secondary)]" data-slot="data-table-row-detail-label">
-                              {rowDetailLabel}
-                            </div>
-                          ) : null}
                           <div onClick={(event) => event.stopPropagation()}>
                             {renderExpandedRow?.(row, index)}
                           </div>
