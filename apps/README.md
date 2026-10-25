@@ -10,7 +10,7 @@ Specs: APPLICATION_SPEC.md, SDKWORK_WORKSPACE_SPEC.md
 The repository root is not the primary runnable app surface.
 This repository uses a hybrid layout. Primary runnable app surfaces currently live outside `apps/`:
 
-- `sdkwork-ui-pc-react/` with `sdkwork-ui-pc-react/sdkwork.app.config.json`
+- `sdkwork-ui-pc-react/` with `sdkwork-ui-pc-react/agent.app.config.json`
 
 ## Directory Index
 
