@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next";
-import React, { useRef, useEffect, ReactNode } from 'react';
+import React, { useRef, useEffect } from 'react';
+import type { ReactNode } from 'react';
 import { cn } from '../utils/cn';
 
 export interface TabItem {
